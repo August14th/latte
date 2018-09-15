@@ -2,7 +2,7 @@ package latte.game.command
 
 import io.netty.channel.Channel
 import io.netty.util.AttributeKey
-import latte.game.componment.PlayerNotFoundException
+import latte.game.PlayerNotFoundException
 import latte.game.network.MapBean
 import latte.game.player.Player
 

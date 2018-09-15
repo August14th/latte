@@ -74,25 +74,28 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
     override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
       val channel = ctx.channel()
       msg match {
-          // 请求
-        case request: Request => throw UnsupportedMessageException(request.`type`)
-          // 正常响应
+        // 正常响应
         case Response(cmd, body) =>
           val request = queue.poll()
           if (cmd == request.command) request.promise.success(body)
-          else throw CommandNotMatchException(request.command, cmd)
-          // 异常响应
+          else throw new RuntimeException(s"Commands not match, " +
+            s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
+        // 异常响应
         case Exception(cmd, errMsg) =>
           val request = queue.poll()
           if (cmd == request.command) request.promise.failure(new RuntimeException(errMsg))
-          else throw CommandNotMatchException(request.command, cmd)
-          // 通知
+          else throw new RuntimeException(s"Commands not match, " +
+            s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
+        // 通知
         case Event(cmd, body) =>
-            handlers.get(cmd) match {
+          handlers.get(cmd) match {
             case Some(listener) => orderingExecute(channel, listener(channel, body))
             case None =>
           }
+        // 请求
+        case request: Request => throw new RuntimeException(s"Unsupported message type:${request.`type`}")
       }
     }
   }
+
 }

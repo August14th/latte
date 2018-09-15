@@ -15,7 +15,7 @@ object Skill {
 
 }
 
-class Skill(val player: Player) {
+class Skill(player: Player) {
 
   def toMapBean = MapBean.empty
 

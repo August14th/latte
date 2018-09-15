@@ -3,8 +3,9 @@ package latte.game.player
 import java.util.concurrent.atomic.AtomicInteger
 
 import io.netty.channel.Channel
-import latte.game.componment.{BaseInfo, Skill}
-import latte.game.network.{MapBean, Event}
+import latte.game.PlayerNotFoundException
+import latte.game.componment.Skill
+import latte.game.network.{Event, MapBean}
 
 import scala.collection.mutable
 
@@ -24,35 +25,24 @@ object Player {
       val count = counts.synchronized {
         counts.getOrElseUpdate(playerId, new AtomicInteger(0))
       }
-      // 如果内存中没有重新从数据库中加载一次
-      count.synchronized {
-        players.get(playerId) match {
-          case None =>
-            val player = loadFromDB(playerId) // 尝试从数据库load
-            if (player != null) players += playerId -> player
-          case _ =>
-        }
+      val player = try count.synchronized {
+        // 如果内存中没有重新从数据库中加载一次
+        players.getOrElseUpdate(playerId, new Player(playerId))
+      } catch {
+        case _: PlayerNotFoundException => return op(None)
       }
-      // 基于计数的内存管理
-      players.get(playerId) match {
-        case player: Some[_] =>
-          count.incrementAndGet()
-          try {
-            op(player)
-          } finally {
-            count.decrementAndGet()
-          }
-        case None => op(None)
+      try {
+        // 基于计数的内存管理
+        count.incrementAndGet()
+        op(Some(player))
+      } finally {
+        count.decrementAndGet()
       }
     } else op(None)
   }
-
-  def loadFromDB(playerId: String): Player = {
-    new Player(playerId)
-  }
 }
 
-class Player(val id: String) extends BaseInfo(id){
+class Player(id: String) extends User(id) {
 
   lazy val skill = Skill(this)
 

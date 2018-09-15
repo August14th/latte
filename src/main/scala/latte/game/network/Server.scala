@@ -7,6 +7,7 @@ import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
+import latte.game.GameException
 import latte.game.network.OrderingExecutor._
 
 /**
@@ -39,22 +40,21 @@ class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
 
   class ServerHandler extends SimpleChannelInboundHandler[Message] {
 
-    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
-
-      def onThrowable(cmd: Int, throwable: Throwable): Exception = {
-        throwable match {
-          case ex: InvocationTargetException =>
-            onThrowable(cmd, ex.getTargetException)
-          case ex: GameException =>
-            // 业务错误
-            Exception(cmd, ex.getMessage)
-          case ex: Throwable =>
-            // 服务器内部错误
-            ex.printStackTrace()
-            Exception(cmd, "Internal server exception")
-        }
+    def toException(cmd: Int, throwable: Throwable): Exception = {
+      throwable match {
+        case ex: InvocationTargetException =>
+          toException(cmd, ex.getTargetException)
+        case ex: GameException =>
+          // 业务错误
+          Exception(cmd, ex.getMessage)
+        case ex: Throwable =>
+          // 服务器内部错误
+          ex.printStackTrace()
+          Exception(cmd, "Internal server exception")
       }
+    }
 
+    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
       val channel = ctx.channel()
       msg match {
         // 请求
@@ -67,12 +67,12 @@ class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
                 ctx.writeAndFlush(Response(cmd, response))
               } catch {
                 case throwable: Throwable =>
-                  ctx.writeAndFlush(onThrowable(cmd, throwable))
+                  ctx.writeAndFlush(toException(cmd, throwable))
               })
             // 未注册
-            case None => ctx.writeAndFlush(CommandNotFoundException(cmd))
+            case None => ctx.writeAndFlush(Exception(cmd, s"Command:0x${Integer.toHexString(cmd)} not found"))
           }
-        case _ => throw UnsupportedMessageException(msg.`type`)
+        case _ => throw new RuntimeException(s"Unsupported message type:${msg.`type`}")
       }
     }
   }
