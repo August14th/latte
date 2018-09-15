@@ -11,7 +11,7 @@ object GameClient extends App {
   client.connect("localhost", 2018)
   // 请求
   var rsp = client.ask(0x0101, MapBean("playerId" -> "10001"))
-  println(rsp.getString("playerId"))
-  rsp = client.ask(0x0101, MapBean("playerId" -> "10001"))
-  println(rsp.getString("playerId"))
+  println(rsp.getString("name"))
+  rsp = client.ask(0x0201, MapBean("playerId" -> "10001"))
+  println(rsp.getString("name"))
 }

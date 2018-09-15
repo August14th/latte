@@ -7,11 +7,11 @@ import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
+import latte.game.network.OrderingExecutor._
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success}
-import OrderingExecutor._
 
 /**
  * Created by linyuhe on 2018/9/13.
@@ -43,7 +43,7 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
       channel = future.channel()
       channel.closeFuture()
     } catch {
-      case ex: Exception => workerGroup.shutdownGracefully(); throw ex
+      case ex: Throwable => workerGroup.shutdownGracefully(); throw ex
     }
   }
 
@@ -56,8 +56,8 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
     }
   }
 
-  def push(cmd: Int, notice: MapBean) = {
-    channel.writeAndFlush(Notice(cmd, notice))
+  def push(cmd: Int, event: MapBean) = {
+    channel.writeAndFlush(Event(cmd, event))
   }
 
   class ClientOutBoundHandler extends ChannelOutboundHandlerAdapter {
@@ -71,27 +71,27 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
 
   class ClientInBoundHandler extends SimpleChannelInboundHandler[Message] {
 
-    override def channelRead0(ctx: ChannelHandlerContext, response: Message) = {
+    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
       val channel = ctx.channel()
-      if (response.isPush) {
-        // 推送
-        val h = handlers.get(response.command)
-        h match {
-          case Some(handler) => orderingExecute(channel, handler(channel, response.body))
-          case None =>
-        }
-      } else {
-        // 响应
-        val request = queue.poll()
-        if (response.command == request.command) {
-          if (response.isError) {
-            request.promise.failure(new RuntimeException(response.body.getString("err")))
-          } else {
-            request.promise.success(response.body)
+      msg match {
+          // 请求
+        case request: Request => throw UnsupportedMessageException(request.`type`)
+          // 正常响应
+        case Response(cmd, body) =>
+          val request = queue.poll()
+          if (cmd == request.command) request.promise.success(body)
+          else throw CommandNotMatchException(request.command, cmd)
+          // 异常响应
+        case Exception(cmd, errMsg) =>
+          val request = queue.poll()
+          if (cmd == request.command) request.promise.failure(new RuntimeException(errMsg))
+          else throw CommandNotMatchException(request.command, cmd)
+          // 通知
+        case Event(cmd, body) =>
+            handlers.get(cmd) match {
+            case Some(listener) => orderingExecute(channel, listener(channel, body))
+            case None =>
           }
-        }
-        else throw new RuntimeException(s"Commands does not match, expected is ${Integer.toHexString(request.command)} " +
-          s"but is ${Integer.toHexString(response.command)}")
       }
     }
   }

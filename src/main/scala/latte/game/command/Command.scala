@@ -2,6 +2,7 @@ package latte.game.command
 
 import io.netty.channel.Channel
 import io.netty.util.AttributeKey
+import latte.game.componment.PlayerNotFoundException
 import latte.game.network.MapBean
 import latte.game.player.Player
 
@@ -21,8 +22,12 @@ trait Command {
       cmd -> (if (method.getParameterTypes.toList.head == classOf[Player]) {
         // 登录后
         (channel: Channel, request: MapBean) =>
-          val player = channel.attr(AttributeKey.valueOf[Player]("player")).get()
-          method.invoke(this, player, request).asInstanceOf[MapBean]
+          val playerId = channel.attr(AttributeKey.valueOf[String]("playerId")).get()
+          Player(playerId) {
+            case Some(player) => method.invoke(this, player, request).asInstanceOf[MapBean]
+            case None => throw PlayerNotFoundException(playerId)
+          }
+
       } else {
         // 登录前
         (channel: Channel, request: MapBean) =>

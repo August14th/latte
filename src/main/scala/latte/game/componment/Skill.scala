@@ -1,5 +1,6 @@
-package latte.game
+package latte.game.componment
 
+import latte.game.network.MapBean
 import latte.game.player.Player
 import latte.game.proxy.ProxyFactory
 
@@ -14,7 +15,8 @@ object Skill {
 
 }
 
-class Skill(player: Player) {
+class Skill(val player: Player) {
 
+  def toMapBean = MapBean.empty
 
 }

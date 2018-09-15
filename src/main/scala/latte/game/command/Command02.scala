@@ -9,6 +9,6 @@ import latte.game.player.Player
 object Command02 extends Command {
 
   def handler01(player: Player, request: MapBean): MapBean = {
-    MapBean("code" -> 1)
+    MapBean("name" -> player.name)
   }
 }

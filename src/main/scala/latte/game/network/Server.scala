@@ -7,7 +7,7 @@ import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
-import OrderingExecutor._
+import latte.game.network.OrderingExecutor._
 
 /**
  * Created by linyuhe on 2018/5/19.
@@ -39,25 +39,40 @@ class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
 
   class ServerHandler extends SimpleChannelInboundHandler[Message] {
 
-    override def channelRead0(ctx: ChannelHandlerContext, request: Message) = {
-      val channel = ctx.channel()
-      val cmd = request.command
-      handlers.get(cmd) match {
-        // 每个channel的请求顺序执行
-        case Some(handler) =>
-          orderingExecute(channel, try {
-            val response = handler(channel, request.body)
-            ctx.writeAndFlush(Response(cmd, response))
-          } catch {
-            case ex: InvocationTargetException =>
-              ctx.writeAndFlush(ErrorResponse(cmd, ex.getTargetException.getMessage))
-            case ex: Throwable => {
-              ctx.writeAndFlush(ErrorResponse(cmd, ex.getMessage))
-            }
-          })
+    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
 
-        // 未注册
-        case None => ctx.writeAndFlush(ErrorResponse(cmd, s"Command:0x${Integer.toHexString(cmd)} not found"))
+      def onThrowable(cmd: Int, throwable: Throwable): Exception = {
+        throwable match {
+          case ex: InvocationTargetException =>
+            onThrowable(cmd, ex.getTargetException)
+          case ex: GameException =>
+            // 业务错误
+            Exception(cmd, ex.getMessage)
+          case ex: Throwable =>
+            // 服务器内部错误
+            ex.printStackTrace()
+            Exception(cmd, "Internal server exception")
+        }
+      }
+
+      val channel = ctx.channel()
+      msg match {
+        // 请求
+        case Request(cmd, body) =>
+          handlers.get(cmd) match {
+            // 每个channel的请求顺序执行
+            case Some(handler) =>
+              orderingExecute(channel, try {
+                val response = handler(channel, body)
+                ctx.writeAndFlush(Response(cmd, response))
+              } catch {
+                case throwable: Throwable =>
+                  ctx.writeAndFlush(onThrowable(cmd, throwable))
+              })
+            // 未注册
+            case None => ctx.writeAndFlush(CommandNotFoundException(cmd))
+          }
+        case _ => throw UnsupportedMessageException(msg.`type`)
       }
     }
   }

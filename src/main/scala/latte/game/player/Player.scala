@@ -1,8 +1,10 @@
 package latte.game.player
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import io.netty.channel.Channel
-import latte.game.Skill
-import latte.game.network.{MapBean, Notice}
+import latte.game.componment.{BaseInfo, Skill}
+import latte.game.network.{MapBean, Event}
 
 import scala.collection.mutable
 
@@ -12,16 +14,18 @@ import scala.collection.mutable
 
 object Player {
 
-  private val locks = mutable.Map.empty[String, AnyRef]
+  private val counts = mutable.Map.empty[String, AtomicInteger]
 
   private val players = mutable.Map.empty[String, Player]
 
-  def apply(playerId: String): Option[Player] = {
-    if (playerId.nonEmpty) {
-      val lock = locks.synchronized {
-        locks.getOrElseUpdate(playerId, new Object)
+  def apply[T](playerId: String)(op: Option[Player] => T): T = {
+    if (playerId != null && playerId.nonEmpty) {
+      // 锁
+      val count = counts.synchronized {
+        counts.getOrElseUpdate(playerId, new AtomicInteger(0))
       }
-      lock.synchronized {
+      // 如果内存中没有重新从数据库中加载一次
+      count.synchronized {
         players.get(playerId) match {
           case None =>
             val player = loadFromDB(playerId) // 尝试从数据库load
@@ -29,8 +33,18 @@ object Player {
           case _ =>
         }
       }
-      players.get(playerId)
-    } else None
+      // 基于计数的内存管理
+      players.get(playerId) match {
+        case player: Some[_] =>
+          count.incrementAndGet()
+          try {
+            op(player)
+          } finally {
+            count.decrementAndGet()
+          }
+        case None => op(None)
+      }
+    } else op(None)
   }
 
   def loadFromDB(playerId: String): Player = {
@@ -38,22 +52,15 @@ object Player {
   }
 }
 
-class Player(val id: String) {
+class Player(val id: String) extends BaseInfo(id){
 
   lazy val skill = Skill(this)
 
-  def channel: Channel = null
+  override def toMapBean = super.toMapBean ++ MapBean("skill" -> skill.toMapBean)
 
-  def persist() = {
+  var channel: Channel = _
 
-  }
-
-  def toMapBean = {
-    MapBean("playerId" -> id)
-  }
-
-  def push(cmd: Int, notice: MapBean): Unit = {
-    // 最低位是push位
-    this.channel.write(Notice(cmd, notice))
+  def push(cmd: Int, event: MapBean): Unit = {
+    if (channel != null) this.channel.write(Event(cmd, event))
   }
 }

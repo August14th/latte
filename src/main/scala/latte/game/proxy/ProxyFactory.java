@@ -1,5 +1,6 @@
 package latte.game.proxy;
 
+import latte.game.player.Player;
 import net.sf.cglib.proxy.Enhancer;
 
 /**
@@ -9,6 +10,9 @@ public class ProxyFactory {
 
     @SuppressWarnings("unchecked")
     public static <T> T getSyncProxy(T target) {
-        return (T) Enhancer.create(target.getClass(), new SynchronizedInterceptor(target));
+        Enhancer e = new Enhancer();
+        e.setSuperclass(target.getClass());
+        e.setCallback(new SynchronizedInterceptor(target));
+        return (T) e.create(new Class[]{Player.class}, new Object[]{null});
     }
 }

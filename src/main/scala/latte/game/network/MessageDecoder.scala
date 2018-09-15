@@ -20,7 +20,13 @@ class MessageDecoder extends LengthFieldBasedFrameDecoder(102400, 4 + 1, 4, 0, 0
         val size = bytes.readInt()
         val byteArray = new Array[Byte](size)
         bytes.readBytes(byteArray)
-        new Message(command, MapBean(mapper.readValue(byteArray, classOf[java.util.HashMap[String, Any]])), flag)
+        val body = MapBean(mapper.readValue(byteArray, classOf[java.util.HashMap[String, Any]]))
+        Message(flag) match {
+          case Message.Request => Request(command, body)
+          case Message.Response => Response(command, body)
+          case Message.Exception => Exception(command, body("err").asInstanceOf[String])
+          case Message.Event => Event(command, body)
+        }
       case _ => null
     }
   }
