@@ -8,7 +8,7 @@ import scala.concurrent.Promise
 
 object Message extends Enumeration {
   type Type = Value
-  // 消息类型 1请求 2响应 3错误响应 4推送
+  // 消息类型 0请求 1响应 2异常响应 3推送
   val Request = Value(0)
   val Response = Value(1)
   val Exception = Value(2)
