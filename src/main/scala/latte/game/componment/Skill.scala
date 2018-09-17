@@ -18,4 +18,5 @@ class Skill(player: Player) extends Component(player) {
 
   def toMapBean = MapBean.empty
 
+  override def loadFromDB() = {}
 }
