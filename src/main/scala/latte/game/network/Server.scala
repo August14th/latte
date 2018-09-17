@@ -17,7 +17,7 @@ object Server {
 
 }
 
-class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
+class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean], val listeners: Map[Int, (Channel, MapBean) => Any]) {
 
   // 监听
   def listen(port: Int) = {
@@ -62,7 +62,7 @@ class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
           handlers.get(cmd) match {
             // 每个channel的请求顺序执行
             case Some(handler) =>
-              orderingExecute(channel, try {
+              orderingExecute[Request](channel, try {
                 val response = handler(channel, body)
                 ctx.writeAndFlush(Response(cmd, response))
               } catch {
@@ -72,6 +72,9 @@ class Server(val handlers: Map[Int, (Channel, MapBean) => MapBean]) {
             // 未注册
             case None => ctx.writeAndFlush(Exception(cmd, s"Command:0x${Integer.toHexString(cmd)} not found"))
           }
+        case Event(cmd, body) =>
+          // 并行处理不同类型的事件
+          listeners.get(cmd).foreach(listener => orderingExecute[Event]((channel, cmd), listener(channel, body)))
         case _ => throw new RuntimeException(s"Unsupported message type:${msg.`type`}")
       }
     }

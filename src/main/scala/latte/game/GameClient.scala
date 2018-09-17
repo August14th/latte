@@ -13,5 +13,7 @@ object GameClient extends App {
   var rsp = client.ask(0x0101, MapBean("playerId" -> "10001"))
   println(rsp.getString("name"))
   rsp = client.ask(0x0201, MapBean())
+
+  client.tell(0x0101, MapBean("secret" -> "42"))
   println(rsp.getString("name"))
 }

@@ -8,7 +8,7 @@ import scala.concurrent.Promise
 
 object Message extends Enumeration {
   type Type = Value
-  // 消息类型 0请求 1响应 2异常响应 3推送
+  // 消息类型 0请求 1响应 2异常响应 3事件
   val Request = Value(0)
   val Response = Value(1)
   val Exception = Value(2)
@@ -16,10 +16,12 @@ object Message extends Enumeration {
 }
 
 class Message(val command: Int, val body: MapBean, val `type`: Message.Type) {
-  val promise = Promise[MapBean]()
+
 }
 
-case class Request(cmd: Int, request: MapBean) extends Message(cmd, request, Message.Request)
+case class Request(cmd: Int, request: MapBean) extends Message(cmd, request, Message.Request){
+  val promise = Promise[MapBean]()
+}
 
 case class Response(cmd: Int, response: MapBean) extends Message(cmd, response, Message.Response)
 

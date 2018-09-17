@@ -4,6 +4,8 @@ import java.util
 import java.util.concurrent.Executors
 
 import scala.collection.mutable
+import scala.reflect.ClassTag
+import scala.reflect._
 
 /**
  * Created by linyuhe on 2018/9/12.
@@ -14,11 +16,12 @@ object OrderingExecutor {
 
   val tasks = mutable.Map.empty[Any, util.Queue[OrderingTask]]
 
-  def orderingExecute(key: Any, task: Runnable) {
+  def orderingExecute[T: ClassTag](key: Any, task: Runnable) {
     var head = false
-    val orderingTask = new OrderingTask(key, task)
+    val newKey = (classTag[T], key)
+    val orderingTask = new OrderingTask(newKey, task)
     tasks.synchronized {
-      val queue = tasks.getOrElseUpdate(key, {
+      val queue = tasks.getOrElseUpdate(newKey, {
         head = true
         new util.LinkedList()
       })
@@ -27,8 +30,8 @@ object OrderingExecutor {
     if (head) executor.execute(orderingTask)
   }
 
-  def orderingExecute(key: Any, task: => Any) {
-    orderingExecute(key, new Runnable {
+  def orderingExecute[T: ClassTag](key: Any, task: => Any) {
+    orderingExecute[T](key, new Runnable {
       override def run() = task
     })
   }

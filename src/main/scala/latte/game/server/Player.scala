@@ -49,8 +49,8 @@ class Player(id: String) extends User(id) {
 
   var channel: Channel = _
 
-  def push(cmd: Int, event: MapBean): Unit = {
-    if (channel != null) this.channel.write(Event(cmd, event))
+  def tell(cmd: Int, event: MapBean): Unit = {
+    if (channel != null) this.channel.writeAndFlush(Event(cmd, event))
   }
 }
 

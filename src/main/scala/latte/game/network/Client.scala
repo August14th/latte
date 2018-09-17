@@ -21,11 +21,11 @@ object Client {
 
 }
 
-class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) {
+class Client(val listeners: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) {
   // 连接
   private var channel: Channel = _
   // 发送出去的所有请求
-  private val queue = new util.LinkedList[Message]()
+  private val queue = new util.LinkedList[Request]()
 
   def connect(host: String, port: Int) = {
     val workerGroup = new NioEventLoopGroup()
@@ -56,23 +56,25 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
     }
   }
 
-  def push(cmd: Int, event: MapBean) = {
+  def tell(cmd: Int, event: MapBean) = {
     channel.writeAndFlush(Event(cmd, event))
   }
 
   class ClientOutBoundHandler extends ChannelOutboundHandlerAdapter {
 
     override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
-      val message = msg.asInstanceOf[Message]
-      queue.push(message)
-      ctx.write(message, promise)
+      msg match {
+        case request: Request => queue.push(request)
+        case event: Event =>
+        case msg: Message => throw new RuntimeException(s"Unsupported message type:${msg.`type`}")
+      }
+      ctx.write(msg, promise)
     }
   }
 
   class ClientInBoundHandler extends SimpleChannelInboundHandler[Message] {
 
     override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
-      val channel = ctx.channel()
       msg match {
         // 正常响应
         case Response(cmd, body) =>
@@ -86,12 +88,10 @@ class Client(val handlers: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) 
           if (cmd == request.command) request.promise.failure(new RuntimeException(errMsg))
           else throw new RuntimeException(s"Commands not match, " +
             s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
-        // 通知
+        // 事件
         case Event(cmd, body) =>
-          handlers.get(cmd) match {
-            case Some(listener) => orderingExecute(channel, listener(channel, body))
-            case None =>
-          }
+          // 并行处理不同类型的事件
+          listeners.get(cmd).foreach(orderingExecute[Event](cmd, _))
         // 请求
         case request: Request => throw new RuntimeException(s"Unsupported message type:${request.`type`}")
       }
