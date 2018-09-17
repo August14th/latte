@@ -21,7 +21,7 @@ object Client {
 
 }
 
-class Client(val listeners: Map[Int, (Channel, MapBean) => MapBean] = Map.empty) {
+class Client(val listeners: Map[Int, MapBean => Any] = Map.empty) {
   // 连接
   private var channel: Channel = _
   // 发送出去的所有请求
@@ -91,7 +91,7 @@ class Client(val listeners: Map[Int, (Channel, MapBean) => MapBean] = Map.empty)
         // 事件
         case Event(cmd, body) =>
           // 并行处理不同类型的事件
-          listeners.get(cmd).foreach(orderingExecute[Event](cmd, _))
+          listeners.get(cmd).foreach(listener => orderingExecute[Event](cmd, listener(body)))
         // 请求
         case request: Request => throw new RuntimeException(s"Unsupported message type:${request.`type`}")
       }
