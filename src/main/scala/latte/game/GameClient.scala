@@ -1,4 +1,4 @@
-package latte.game.bootstrap
+package latte.game
 
 import latte.game.network.{Client, MapBean}
 

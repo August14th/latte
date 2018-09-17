@@ -1,10 +1,8 @@
-package latte.game.command
+package latte.game.server
 
 import io.netty.channel.Channel
 import io.netty.util.AttributeKey
-import latte.game.PlayerNotFoundException
 import latte.game.network.MapBean
-import latte.game.player.Player
 
 /**
  * Created by linyuhe on 2018/5/19.

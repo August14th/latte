@@ -1,9 +1,8 @@
-package latte.game.player
+package latte.game.server
 
 import java.util.concurrent.atomic.AtomicInteger
 
 import io.netty.channel.Channel
-import latte.game.PlayerNotFoundException
 import latte.game.componment.Skill
 import latte.game.network.{Event, MapBean}
 
@@ -53,4 +52,23 @@ class Player(id: String) extends User(id) {
   def push(cmd: Int, event: MapBean): Unit = {
     if (channel != null) this.channel.write(Event(cmd, event))
   }
+}
+
+class User(val id: String) {
+
+  loadFromDB()
+
+  private def loadFromDB() = {
+    if(id == "10001") this.name = "latte"
+    else throw new PlayerNotFoundException(id)
+  }
+
+  var name: String = _
+
+  def persist() = {
+
+  }
+
+  def toMapBean = MapBean("id" -> id, "name" -> name)
+
 }

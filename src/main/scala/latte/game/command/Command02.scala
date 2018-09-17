@@ -1,7 +1,7 @@
 package latte.game.command
 
 import latte.game.network.MapBean
-import latte.game.player.Player
+import latte.game.server.{Player, Command}
 
 /**
  * Created by linyuhe on 2018/5/19.

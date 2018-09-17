@@ -1,4 +1,4 @@
-package latte.game.bootstrap
+package latte.game
 
 import latte.game.command.{Command01, Command02}
 import latte.game.network.Server

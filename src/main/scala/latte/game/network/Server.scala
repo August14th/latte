@@ -7,8 +7,8 @@ import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
-import latte.game.GameException
 import latte.game.network.OrderingExecutor._
+import latte.game.server.GameException
 
 /**
  * Created by linyuhe on 2018/5/19.
