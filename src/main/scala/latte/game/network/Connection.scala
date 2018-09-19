@@ -128,6 +128,7 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
   private val timer = Executors.newSingleThreadScheduledExecutor()
 
   timer.scheduleAtFixedRate(new Runnable {
+    // 每隔5秒检查一次
     override def run(): Unit = idles.synchronized {
       if (idles.nonEmpty)
         while (idles.last._2.isOverdue()) {
@@ -135,8 +136,6 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
         }
     }
   }, 5, 5, TimeUnit.SECONDS)
-
-  // 每隔5秒检查一次
 
   def ask(cmd: Int, request: MapBean): MapBean = {
     val connection = idles.synchronized {
