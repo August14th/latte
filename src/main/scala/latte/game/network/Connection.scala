@@ -28,7 +28,7 @@ object Connection {
 
 trait IConnection {
 
-  def ask(cmd: Int, request: MapBean): MapBean
+  def ask(cmd: Int, request: MapBean, timeout: Int = 3): MapBean
 
   def notify(cmd: Int, event: MapBean): Unit
 
@@ -61,12 +61,16 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     }
   }
 
-  override def ask(cmd: Int, request: MapBean) = {
+  override def ask(cmd: Int, request: MapBean, timeout: Int) = {
     val msg = Request(cmd, request)
     channel.writeAndFlush(msg)
-    Await.ready(msg.promise.future, Duration.Inf).value.get match {
-      case Success(response) => response
-      case Failure(ex) => throw new RuntimeException(ex.getMessage)
+    try {
+      Await.ready(msg.promise.future, timeout.second).value.get match {
+        case Success(response) => response
+        case Failure(ex) => throw new RuntimeException(ex.getMessage)
+      }
+    } catch {
+      case ex: Throwable => channel.close(); throw ex
     }
   }
 
@@ -137,7 +141,7 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
     }
   }, 5, 5, TimeUnit.SECONDS)
 
-  def ask(cmd: Int, request: MapBean): MapBean = {
+  def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     val connection = idles.synchronized {
       if (idles.isEmpty)
         Connection.newSingleConnection(host, port, listeners) // 创建
@@ -145,7 +149,7 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
         idles.remove(0)._1 // 从空闲连接池中拿一个连接
     }
     try {
-      connection.ask(cmd, request) // 操作
+      connection.ask(cmd, request, timeout) // 操作
     } finally {
       idles.synchronized {
         idles.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后过期
