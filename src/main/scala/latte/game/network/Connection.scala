@@ -1,7 +1,7 @@
 package latte.game.network
 
-import java.util
-import java.util.concurrent.{TimeoutException, Executors, TimeUnit}
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{Executors, TimeUnit}
 
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel._
@@ -12,7 +12,7 @@ import latte.game.network.OrderingExecutor._
 import latte.game.server.GameException
 
 import scala.concurrent.Await
-import scala.concurrent.duration.{Deadline, Duration, _}
+import scala.concurrent.duration.{Deadline, _}
 import scala.util.{Failure, Success}
 
 /**
@@ -38,11 +38,15 @@ trait IConnection {
 
 class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
   // 发送出去的所有请求
-  private val queue = new util.LinkedList[Request]()
+  private val queue = new collection.mutable.Queue[Request]()
 
   private val channelFuture = connect()
 
   private def channel = channelFuture.awaitUninterruptibly().channel()
+
+  private val valid = new AtomicBoolean(true)
+
+  def isValid = valid.get()
 
   private def connect() = {
     val workerGroup = new NioEventLoopGroup()
@@ -68,11 +72,11 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     try {
       Await.ready(msg.promise.future, timeout.second).value.get match {
         case Success(response) => response
-        case Failure(ex) => throw new GameException(ex.getMessage)
+        case Failure(ex) => throw ex
       }
     } catch {
-      case ex: Throwable =>
-        if (!ex.isInstanceOf[GameException]) channel.close(); throw ex
+      case cause: GameException => throw cause // 业务异常
+      case cause: Throwable => this.doClose(cause) throw cause // 超时等其他异常
     }
   }
 
@@ -81,14 +85,22 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
   }
 
   override def close(): Unit = {
-    channel.close()
+    this.doClose(new RuntimeException("closed"))
+  }
+
+  private def doClose(cause: Throwable) = this.synchronized {
+    if (isValid) {
+      valid.set(false)
+      channel.close()
+      queue.dequeueAll(_ => true).foreach(_.promise.tryFailure(cause))
+    }
   }
 
   class ClientOutBoundHandler extends ChannelOutboundHandlerAdapter {
 
     override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
       msg match {
-        case request: Request => queue.push(request)
+        case request: Request => queue.enqueue(request)
         case event: Event =>
         case msg: Message => throw new RuntimeException(s"Unsupported message type:${msg.`type`}")
       }
@@ -102,14 +114,14 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
       msg match {
         // 正常响应
         case Response(cmd, body) =>
-          val request = queue.poll()
+          val request = queue.dequeue()
           if (cmd == request.command) request.promise.success(body)
           else throw new RuntimeException(s"Commands not match, " +
             s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
         // 异常响应
         case Exception(cmd, errMsg) =>
-          val request = queue.poll()
-          if (cmd == request.command) request.promise.failure(new RuntimeException(errMsg))
+          val request = queue.dequeue()
+          if (cmd == request.command) request.promise.failure(new GameException(errMsg))
           else throw new RuntimeException(s"Commands not match, " +
             s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
         // 事件
@@ -119,6 +131,10 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
         // 请求
         case request: Request => throw new RuntimeException(s"Unsupported message type:${request.`type`}")
       }
+    }
+
+    override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
+      doClose(cause)
     }
   }
 
@@ -150,13 +166,10 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
       else
         idles.remove(0)._1 // 从空闲连接池中拿一个连接
     }
-    var exception: Throwable = null
     try {
       connection.ask(cmd, request, timeout) // 操作
-    } catch {
-      case ex: Throwable => exception = ex; throw ex
     } finally {
-      if (exception == null || exception.isInstanceOf[GameException]) {
+      if (connection.isValid) idles.synchronized {
         idles.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后过期
       }
     }
