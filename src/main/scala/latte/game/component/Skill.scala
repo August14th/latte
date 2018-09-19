@@ -1,4 +1,4 @@
-package latte.game.componment
+package latte.game.component
 
 import latte.game.network.MapBean
 import latte.game.server.{Manager, ProxyFactory, Player, Component}
@@ -14,7 +14,7 @@ object Skill extends Manager {
 
 }
 
-class Skill(player: Player) extends Component(player) {
+class Skill private(player: Player) extends Component(player) {
 
   def toMapBean = MapBean.empty
 

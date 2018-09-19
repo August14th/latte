@@ -3,7 +3,7 @@ package latte.game.server
 import java.util.concurrent.atomic.AtomicInteger
 
 import io.netty.channel.Channel
-import latte.game.componment.Skill
+import latte.game.component.Skill
 import latte.game.network.{Event, MapBean}
 
 import scala.collection.mutable

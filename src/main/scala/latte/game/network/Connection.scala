@@ -1,6 +1,7 @@
 package latte.game.network
 
 import java.util
+import java.util.concurrent.{Executors, TimeUnit}
 
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel._
@@ -10,24 +11,39 @@ import io.netty.channel.socket.nio.NioSocketChannel
 import latte.game.network.OrderingExecutor._
 
 import scala.concurrent.Await
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Deadline, Duration, _}
 import scala.util.{Failure, Success}
 
 /**
  * Created by linyuhe on 2018/9/13.
  */
 
-object Client {
+object Connection {
+
+  def newCachedConnectionPool(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty) = new CachedConnectionPool(host, port, listeners)
+
+  def newSingleConnection(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty) = new Connection(host, port, listeners)
 
 }
 
-class Client(val listeners: Map[Int, MapBean => Any] = Map.empty) {
-  // 连接
-  private var channel: Channel = _
+trait IConnection {
+
+  def ask(cmd: Int, request: MapBean): MapBean
+
+  def notify(cmd: Int, event: MapBean): Unit
+
+  def close(): Unit
+}
+
+class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
   // 发送出去的所有请求
   private val queue = new util.LinkedList[Request]()
 
-  def connect(host: String, port: Int) = {
+  private val channelFuture = connect()
+
+  private def channel = channelFuture.awaitUninterruptibly().channel()
+
+  private def connect() = {
     val workerGroup = new NioEventLoopGroup()
     try {
       val bootstrap = new Bootstrap()
@@ -39,15 +55,13 @@ class Client(val listeners: Map[Int, MapBean => Any] = Map.empty) {
           ch.pipeline().addLast(new MessageEncoder, new MessageDecoder, new ClientOutBoundHandler, new ClientInBoundHandler)
         }
       })
-      val future = bootstrap.connect(host, port).sync()
-      channel = future.channel()
-      channel.closeFuture()
+      bootstrap.connect(host, port)
     } catch {
       case ex: Throwable => workerGroup.shutdownGracefully(); throw ex
     }
   }
 
-  def ask(cmd: Int, request: MapBean) = {
+  override def ask(cmd: Int, request: MapBean) = {
     val msg = Request(cmd, request)
     channel.writeAndFlush(msg)
     Await.ready(msg.promise.future, Duration.Inf).value.get match {
@@ -56,8 +70,12 @@ class Client(val listeners: Map[Int, MapBean => Any] = Map.empty) {
     }
   }
 
-  def tell(cmd: Int, event: MapBean) = {
+  override def notify(cmd: Int, event: MapBean) = {
     channel.writeAndFlush(Event(cmd, event))
+  }
+
+  override def close(): Unit = {
+    channel.close()
   }
 
   class ClientOutBoundHandler extends ChannelOutboundHandlerAdapter {
@@ -98,4 +116,49 @@ class Client(val listeners: Map[Int, MapBean => Any] = Map.empty) {
     }
   }
 
+}
+
+class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
+
+  // 同步请求使用连接池
+  private val idles = collection.mutable.ListBuffer[(Connection, Deadline)]()
+  // 事件使用的client
+  private val eventConnection = Connection.newSingleConnection(host, port, listeners)
+  // 启动定时器
+  private val timer = Executors.newSingleThreadScheduledExecutor()
+
+  timer.scheduleAtFixedRate(new Runnable {
+    override def run(): Unit = idles.synchronized {
+      if (idles.nonEmpty)
+        while (idles.last._2.isOverdue()) {
+          idles.remove(idles.size - 1)._1.close()
+        }
+    }
+  }, 5, 5, TimeUnit.SECONDS)
+
+  // 每隔5秒检查一次
+
+  def ask(cmd: Int, request: MapBean): MapBean = {
+    val connection = idles.synchronized {
+      if (idles.isEmpty)
+        Connection.newSingleConnection(host, port, listeners) // 创建
+      else
+        idles.remove(0)._1 // 从空闲连接池中拿一个连接
+    }
+    try {
+      connection.ask(cmd, request) // 操作
+    } finally {
+      idles.synchronized {
+        idles.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后过期
+      }
+    }
+  }
+
+  def notify(cmd: Int, event: MapBean): Unit = eventConnection.notify(cmd, event)
+
+  def close(): Unit = {
+    timer.shutdown()
+    idles.synchronized(idles.foreach(_._1.close()))
+    eventConnection.close()
+  }
 }
