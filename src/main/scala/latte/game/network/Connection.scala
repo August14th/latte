@@ -9,6 +9,7 @@ import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
 import latte.game.network.OrderingExecutor._
+import latte.game.server.GameException
 
 import scala.concurrent.Await
 import scala.concurrent.duration.{Deadline, Duration, _}
@@ -67,10 +68,11 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     try {
       Await.ready(msg.promise.future, timeout.second).value.get match {
         case Success(response) => response
-        case Failure(ex) => throw new RuntimeException(ex.getMessage)
+        case Failure(ex) => throw new GameException(ex.getMessage)
       }
     } catch {
-      case ex: TimeoutException => channel.close(); throw ex // 超时
+      case ex: Throwable =>
+        if (!ex.isInstanceOf[GameException]) channel.close(); throw ex
     }
   }
 
@@ -148,10 +150,13 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
       else
         idles.remove(0)._1 // 从空闲连接池中拿一个连接
     }
+    var exception: Throwable = null
     try {
       connection.ask(cmd, request, timeout) // 操作
+    } catch {
+      case ex: Throwable => exception = ex; throw ex
     } finally {
-      idles.synchronized {
+      if (exception == null || exception.isInstanceOf[GameException]) {
         idles.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后过期
       }
     }
