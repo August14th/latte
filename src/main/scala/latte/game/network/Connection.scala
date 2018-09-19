@@ -1,7 +1,7 @@
 package latte.game.network
 
 import java.util
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util.concurrent.{TimeoutException, Executors, TimeUnit}
 
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel._
@@ -70,7 +70,7 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
         case Failure(ex) => throw new RuntimeException(ex.getMessage)
       }
     } catch {
-      case ex: Throwable => channel.close(); throw ex
+      case ex: TimeoutException => channel.close(); throw ex // 超时
     }
   }
 
