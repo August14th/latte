@@ -178,12 +178,11 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
         connections.remove(0)._1 // 从空闲连接池中拿一个连接
     }
     try {
-      connection.ask(cmd, request, timeout) // 操作
+      connection.ask(cmd, request, timeout) // 发送请求
     } finally {
-      if (!connection.isClosed)
-        connections.synchronized {
-          connections.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后销毁
-        }
+      if (!connection.isClosed) connections.synchronized {
+        connections.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后销毁
+      }
     }
   }
 
