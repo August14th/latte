@@ -1,18 +1,19 @@
 package latte.game.network
 
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.{TimeUnit, _}
 
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
+import io.netty.util.AttributeKey
 import latte.game.network.OrderingExecutor._
 import latte.game.server.GameException
 
-import scala.concurrent.Await
 import scala.concurrent.duration.{Deadline, _}
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /**
@@ -20,6 +21,8 @@ import scala.util.{Failure, Success}
  */
 
 object Connection {
+
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
   def newCachedConnectionPool(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty) = new CachedConnectionPool(host, port, listeners)
 
@@ -33,153 +36,178 @@ trait IConnection {
 
   def notify(cmd: Int, event: MapBean): Unit
 
-  def close(): Unit
+  def close(): Future[Unit]
+
+  protected val closed = new AtomicBoolean(false)
+
+  def isClosed = closed.get()
+
 }
 
 class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
-  // 发送出去的所有请求
-  private val queue = new collection.mutable.Queue[Request]()
 
   private val channelFuture = connect()
 
-  private def channel = channelFuture.awaitUninterruptibly().channel()
-
-  private val valid = new AtomicBoolean(true)
-
-  def isValid = valid.get()
+  private val closedPromise = Promise[Unit]()
 
   private def connect() = {
     val workerGroup = new NioEventLoopGroup()
-    try {
-      val bootstrap = new Bootstrap()
-      bootstrap.group(workerGroup)
-      bootstrap.channel(classOf[NioSocketChannel])
-      bootstrap.option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
-      bootstrap.handler(new ChannelInitializer[SocketChannel] {
-        override def initChannel(ch: SocketChannel) {
-          ch.pipeline().addLast(new MessageEncoder, new MessageDecoder, new ClientOutBoundHandler, new ClientInBoundHandler)
-        }
-      })
-      bootstrap.connect(host, port)
-    } catch {
-      case ex: Throwable => workerGroup.shutdownGracefully(); throw ex
-    }
+    val bootstrap = new Bootstrap()
+    bootstrap.group(workerGroup)
+    bootstrap.channel(classOf[NioSocketChannel])
+    bootstrap.option[java.lang.Integer](ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000) // 连接超时
+    bootstrap.option[java.lang.Boolean](ChannelOption.SO_KEEPALIVE, true)
+    bootstrap.handler(new ChannelInitializer[SocketChannel] {
+      override def initChannel(ch: SocketChannel) {
+        ch.pipeline().addLast(new MessageEncoder, new MessageDecoder, new ConnectionOutBoundHandler, new ConnectionInBoundHandler(listeners))
+      }
+    })
+    val channelFuture = bootstrap.connect(host, port)
+    // 创建连接关闭时的监听器
+    channelFuture.channel().closeFuture().addListener(new ChannelFutureListener {
+      override def operationComplete(future: ChannelFuture): Unit = {
+        workerGroup.shutdownGracefully()
+        closedPromise.trySuccess()
+      }
+    })
+    channelFuture
   }
 
-  override def ask(cmd: Int, request: MapBean, timeout: Int) = {
+  // 同时只能发送一个请求
+  override def ask(cmd: Int, request: MapBean, timeout: Int) = this.synchronized {
+    if (isClosed) throw ConnectionClosedException()
+    val channel = channelFuture.sync().channel()
     val msg = Request(cmd, request)
-    channel.writeAndFlush(msg)
+    channel.writeAndFlush(msg).addListener(new ChannelFutureListener {
+      override def operationComplete(future: ChannelFuture): Unit = {
+        if (!future.isSuccess) msg.promise.tryFailure(future.cause()) // channel异常
+      }
+    })
     try {
       Await.ready(msg.promise.future, timeout.second).value.get match {
         case Success(response) => response
-        case Failure(ex) => throw ex
+        case Failure(exception) => throw exception
       }
     } catch {
       case cause: GameException => throw cause // 业务异常
-      case cause: Throwable => this.doClose(cause) throw cause // 超时等其他异常
+      case cause: Throwable => close(); throw cause // timeout、channel异常
     }
   }
 
   override def notify(cmd: Int, event: MapBean) = {
-    channel.writeAndFlush(Event(cmd, event))
-  }
-
-  override def close(): Unit = {
-    this.doClose(new RuntimeException("closed"))
-  }
-
-  private def doClose(cause: Throwable) = this.synchronized {
-    if (isValid) {
-      valid.set(false)
-      channel.close()
-      queue.dequeueAll(_ => true).foreach(_.promise.tryFailure(cause))
-    }
-  }
-
-  class ClientOutBoundHandler extends ChannelOutboundHandlerAdapter {
-
-    override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
-      msg match {
-        case request: Request => queue.enqueue(request)
-        case event: Event =>
-        case msg: Message => throw new RuntimeException(s"Unsupported message type:${msg.`type`}")
+    if (isClosed) throw ConnectionClosedException()
+    val channel = channelFuture.sync().channel()
+    channel.writeAndFlush(Event(cmd, event)).addListener(new ChannelFutureListener {
+      override def operationComplete(future: ChannelFuture): Unit = {
+        if (!future.isSuccess) close() // channel异常
       }
-      ctx.write(msg, promise)
-    }
+    })
   }
 
-  class ClientInBoundHandler extends SimpleChannelInboundHandler[Message] {
-
-    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
-      msg match {
-        // 正常响应
-        case Response(cmd, body) =>
-          val request = queue.dequeue()
-          if (cmd == request.command) request.promise.success(body)
-          else throw new RuntimeException(s"Commands not match, " +
-            s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
-        // 异常响应
-        case Exception(cmd, errMsg) =>
-          val request = queue.dequeue()
-          if (cmd == request.command) request.promise.failure(new GameException(errMsg))
-          else throw new RuntimeException(s"Commands not match, " +
-            s"expected is ${Integer.toHexString(request.command)} but is ${Integer.toHexString(cmd)}")
-        // 事件
-        case Event(cmd, body) =>
-          // 并行处理不同类型的事件
-          listeners.get(cmd).foreach(listener => orderingExecute[Event](cmd, listener(body)))
-        // 请求
-        case request: Request => throw new RuntimeException(s"Unsupported message type:${request.`type`}")
-      }
+  override def close() = {
+    if (closed.compareAndSet(false, true)) {
+      channelFuture.channel().close()
     }
+    closedPromise.future
+  }
+}
 
-    override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
-      doClose(cause)
+class ConnectionOutBoundHandler extends ChannelOutboundHandlerAdapter {
+
+  override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
+    msg match {
+      case request: Request => ctx.channel().attr(AttributeKey.valueOf[Request]("request")).set(request)
+      case event: Event =>
+      case msg: Message => throw UnSupportedMessageException(msg.`type`)
+    }
+    ctx.write(msg, promise)
+  }
+}
+
+class ConnectionInBoundHandler(val listeners: Map[Int, MapBean => Any] = Map.empty) extends SimpleChannelInboundHandler[Message] {
+
+  override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
+    msg match {
+      // 正常响应
+      case Response(cmd, response) =>
+        val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
+        if (cmd == request.command) request.promise.trySuccess(response)
+        else throw CommandNotMatchException(request.command, cmd)
+      // 异常响应
+      case Exception(cmd, exception) =>
+        val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
+        if (cmd == request.command) request.promise.tryFailure(new GameException(exception))
+        else throw CommandNotMatchException(request.command, cmd)
+      // 事件
+      case Event(cmd, event) =>
+        // 并行处理不同类型的事件
+        listeners.get(cmd).foreach(listener => orderingExecute[Event](cmd, listener(event)))
+      // 请求
+      case request: Request => throw UnSupportedMessageException(request.`type`)
     }
   }
-
 }
 
 class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
 
   // 同步请求使用连接池
-  private val idles = collection.mutable.ListBuffer[(Connection, Deadline)]()
-  // 事件使用的client
+  private val connections = collection.mutable.ListBuffer[(Connection, Deadline)]()
+  // 事件使用的connection
   private val eventConnection = Connection.newSingleConnection(host, port, listeners)
-  // 启动定时器
+  // 定时关闭过期连接
   private val timer = Executors.newSingleThreadScheduledExecutor()
+
+  private val closedPromise = Promise[Unit]()
 
   timer.scheduleAtFixedRate(new Runnable {
     // 每隔5秒检查一次
-    override def run(): Unit = idles.synchronized {
-      if (idles.nonEmpty)
-        while (idles.last._2.isOverdue()) {
-          idles.remove(idles.size - 1)._1.close()
+    override def run(): Unit = connections.synchronized {
+      if (connections.nonEmpty)
+        while (connections.last._2.isOverdue()) {
+          connections.remove(connections.size - 1)._1.close()
         }
     }
   }, 5, 5, TimeUnit.SECONDS)
 
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
-    val connection = idles.synchronized {
-      if (idles.isEmpty)
+    if (isClosed) throw ConnectionClosedException()
+    val connection = connections.synchronized {
+      if (connections.isEmpty)
         Connection.newSingleConnection(host, port, listeners) // 创建
       else
-        idles.remove(0)._1 // 从空闲连接池中拿一个连接
+        connections.remove(0)._1 // 从空闲连接池中拿一个连接
     }
     try {
       connection.ask(cmd, request, timeout) // 操作
     } finally {
-      if (connection.isValid) idles.synchronized {
-        idles.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后过期
-      }
+      if (!connection.isClosed)
+        connections.synchronized {
+          connections.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后销毁
+        }
     }
   }
 
-  def notify(cmd: Int, event: MapBean): Unit = eventConnection.notify(cmd, event)
+  def notify(cmd: Int, event: MapBean): Unit = {
+    if (isClosed) throw ConnectionClosedException()
+    eventConnection.notify(cmd, event)
+  }
 
-  def close(): Unit = {
-    timer.shutdown()
-    idles.synchronized(idles.foreach(_._1.close()))
-    eventConnection.close()
+  def close() = {
+    if (closed.compareAndSet(false, true)) {
+      timer.shutdownNow()
+      val count = new AtomicInteger()
+      val all = eventConnection :: connections.synchronized(connections.map(_._1)).toList
+      count.set(all.size)
+      all.foreach(_.close().onComplete(f => {
+        if (count.decrementAndGet() == 0) closedPromise.trySuccess()
+      })(Connection.ec))
+    }
+    closedPromise.future
   }
 }
+
+case class ConnectionClosedException() extends RuntimeException("Connection has been closed.")
+
+case class CommandNotMatchException(cmd1: Int, cmd2: Int) extends RuntimeException(s"Commands not match, expected is ${Integer.toHexString(cmd1)} but is ${Integer.toHexString(cmd2)}")
+
+case class UnSupportedMessageException(`type`: Message.Type) extends RuntimeException(s"Unsupported message type:${`type`.id}")

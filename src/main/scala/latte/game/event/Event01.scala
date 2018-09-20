@@ -1,5 +1,6 @@
 package latte.game.event
 
+import io.netty.channel.Channel
 import latte.game.network.MapBean
 import latte.game.server.{Player, Event}
 
@@ -11,6 +12,12 @@ object Event01 extends Event {
   def handler01(player: Player, event: MapBean) = {
 
     println(s"playerId: ${player.id}, secret:${event.getString("secret")}")
+
+  }
+
+  def handler02(channel: Channel, event: MapBean) = {
+
+    println(s"channel: ${channel.id}, secret:${event.getString("secret")}")
 
   }
 
