@@ -46,9 +46,9 @@ trait IConnection {
 
 class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
 
-  private val channel = connect()
-
   private val closedPromise = Promise[Unit]()
+
+  private val channel = connect()
 
   private def connect() = {
     val workerGroup = new NioEventLoopGroup()
