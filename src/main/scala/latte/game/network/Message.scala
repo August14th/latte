@@ -20,7 +20,7 @@ class Message(val command: Int, val body: MapBean, val `type`: Message.Type) {
 }
 
 case class Request(cmd: Int, request: MapBean) extends Message(cmd, request, Message.Request){
-  val promise = Promise[MapBean]()
+  val response = Promise[MapBean]()
 }
 
 case class Response(cmd: Int, response: MapBean) extends Message(cmd, response, Message.Response)

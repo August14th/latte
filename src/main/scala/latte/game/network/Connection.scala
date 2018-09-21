@@ -46,7 +46,7 @@ trait IConnection {
 
 class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
 
-  private val channelFuture = connect()
+  private val channel = connect()
 
   private val closedPromise = Promise[Unit]()
 
@@ -62,29 +62,28 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
         ch.pipeline().addLast(new MessageEncoder, new MessageDecoder, new ConnectionOutBoundHandler, new ConnectionInBoundHandler(listeners))
       }
     })
-    val channelFuture = bootstrap.connect(host, port)
+    val channel = bootstrap.connect(host, port).sync().channel() // 建立连接
     // 创建连接关闭时的监听器
-    channelFuture.channel().closeFuture().addListener(new ChannelFutureListener {
+    channel.closeFuture().addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
         workerGroup.shutdownGracefully()
         closedPromise.trySuccess()
       }
     })
-    channelFuture
+    channel
   }
 
   // 同时只能发送一个请求
   override def ask(cmd: Int, request: MapBean, timeout: Int) = this.synchronized {
     if (isClosed) throw ConnectionClosedException()
-    val channel = channelFuture.sync().channel()
     val msg = Request(cmd, request)
     channel.writeAndFlush(msg).addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
-        if (!future.isSuccess) msg.promise.tryFailure(future.cause()) // channel异常
+        if (!future.isSuccess) msg.response.tryFailure(future.cause()) // channel异常
       }
     })
     try {
-      Await.ready(msg.promise.future, timeout.second).value.get match {
+      Await.ready(msg.response.future, timeout.second).value.get match {
         case Success(response) => response
         case Failure(exception) => throw exception
       }
@@ -96,7 +95,6 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
 
   override def notify(cmd: Int, event: MapBean) = {
     if (isClosed) throw ConnectionClosedException()
-    val channel = channelFuture.sync().channel()
     channel.writeAndFlush(Event(cmd, event)).addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
         if (!future.isSuccess) close() // channel异常
@@ -105,9 +103,7 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
   }
 
   override def close() = {
-    if (closed.compareAndSet(false, true)) {
-      channelFuture.channel().close()
-    }
+    if (closed.compareAndSet(false, true)) channel.close()
     closedPromise.future
   }
 }
@@ -131,12 +127,12 @@ class ConnectionInBoundHandler(val listeners: Map[Int, MapBean => Any] = Map.emp
       // 正常响应
       case Response(cmd, response) =>
         val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
-        if (cmd == request.command) request.promise.trySuccess(response)
+        if (cmd == request.command) request.response.trySuccess(response)
         else throw CommandNotMatchException(request.command, cmd)
       // 异常响应
       case Exception(cmd, exception) =>
         val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
-        if (cmd == request.command) request.promise.tryFailure(new GameException(exception))
+        if (cmd == request.command) request.response.tryFailure(new GameException(exception))
         else throw CommandNotMatchException(request.command, cmd)
       // 事件
       case Event(cmd, event) =>
@@ -171,12 +167,8 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
 
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     if (isClosed) throw ConnectionClosedException()
-    val connection = connections.synchronized {
-      if (connections.isEmpty)
-        Connection.newSingleConnection(host, port, listeners) // 创建
-      else
-        connections.remove(0)._1 // 从空闲连接池中拿一个连接
-    }
+    val opt = connections.synchronized(connections.headOption) // 从空闲连接池中拿一个连接
+    val connection = if (opt.nonEmpty) opt.get._1 else Connection.newSingleConnection(host, port, listeners)
     try {
       connection.ask(cmd, request, timeout) // 发送请求
     } finally {
