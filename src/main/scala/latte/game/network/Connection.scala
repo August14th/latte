@@ -62,7 +62,11 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
         ch.pipeline().addLast(new MessageEncoder, new MessageDecoder, new ConnectionOutBoundHandler, new ConnectionInBoundHandler(listeners))
       }
     })
-    val channel = bootstrap.connect(host, port).sync().channel() // 建立连接
+    val channel = bootstrap.connect(host, port).addListener(new ChannelFutureListener {
+      override def operationComplete(future: ChannelFuture): Unit = {
+        if (!future.isSuccess) workerGroup.shutdownGracefully()
+      }
+    }).sync().channel() // 建立连接
     // 创建连接关闭时的监听器
     channel.closeFuture().addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
