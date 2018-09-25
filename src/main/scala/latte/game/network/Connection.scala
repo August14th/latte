@@ -32,7 +32,7 @@ trait IConnection {
 
   def ask(cmd: Int, request: MapBean, timeout: Int = 3): MapBean
 
-  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int): Future[Any]
+  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int = 3): Future[Any]
 
   def notify(cmd: Int, event: MapBean): Unit
 
