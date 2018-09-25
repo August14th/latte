@@ -8,13 +8,11 @@ import io.netty.channel._
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioSocketChannel
-import io.netty.util.AttributeKey
 import latte.game.network.OrderingExecutor._
 import latte.game.server.GameException
 
 import scala.concurrent.duration.{Deadline, _}
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
-import scala.util.{Failure, Success}
 
 /**
  * Created by linyuhe on 2018/9/13.
@@ -34,6 +32,8 @@ trait IConnection {
 
   def ask(cmd: Int, request: MapBean, timeout: Int = 3): MapBean
 
+  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int): Future[Any]
+
   def notify(cmd: Int, event: MapBean): Unit
 
   def close(): Future[Unit]
@@ -47,6 +47,8 @@ trait IConnection {
 class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
 
   private val closedPromise = Promise[Unit]()
+
+  private var request: Option[Request] = None
 
   private val channel = connect()
 
@@ -70,6 +72,7 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     // 创建连接关闭时的监听器
     channel.closeFuture().addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
+        request.foreach(_.response.tryFailure(new RuntimeException("channel closed")))
         workerGroup.shutdownGracefully()
         closedPromise.trySuccess()
       }
@@ -77,20 +80,21 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     channel
   }
 
+  override def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int) = {
+    Future(callback(ask(cmd, request, timeout)))(Connection.ec)
+  }
+
   // 同时只能发送一个请求
   override def ask(cmd: Int, request: MapBean, timeout: Int) = this.synchronized {
     if (isClosed) throw ConnectionClosedException()
-    val msg = Request(cmd, request)
-    channel.writeAndFlush(msg).addListener(new ChannelFutureListener {
+    val req = Request(cmd, request)
+    channel.writeAndFlush(req).addListener(new ChannelFutureListener {
       override def operationComplete(future: ChannelFuture): Unit = {
-        if (!future.isSuccess) msg.response.tryFailure(future.cause()) // channel异常
+        if (!future.isSuccess) req.response.tryFailure(future.cause()) // channel异常
       }
     })
     try {
-      Await.ready(msg.response.future, timeout.second).value.get match {
-        case Success(response) => response
-        case Failure(exception) => throw exception
-      }
+      Await.result(req.response.future, timeout.second)
     } catch {
       case cause: GameException => throw cause // 业务异常
       case cause: Throwable => close(); throw cause // timeout、channel异常
@@ -110,42 +114,51 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
     if (closed.compareAndSet(false, true)) channel.close()
     closedPromise.future
   }
-}
 
-class ConnectionOutBoundHandler extends ChannelOutboundHandlerAdapter {
+  class ConnectionOutBoundHandler extends ChannelOutboundHandlerAdapter {
 
-  override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
-    msg match {
-      case request: Request => ctx.channel().attr(AttributeKey.valueOf[Request]("request")).set(request)
-      case event: Event =>
-      case msg: Message => throw UnSupportedMessageException(msg.`type`)
-    }
-    ctx.write(msg, promise)
-  }
-}
-
-class ConnectionInBoundHandler(val listeners: Map[Int, MapBean => Any] = Map.empty) extends SimpleChannelInboundHandler[Message] {
-
-  override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
-    msg match {
-      // 正常响应
-      case Response(cmd, response) =>
-        val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
-        if (cmd == request.command) request.response.trySuccess(response)
-        else throw CommandNotMatchException(request.command, cmd)
-      // 异常响应
-      case Exception(cmd, exception) =>
-        val request = ctx.channel().attr(AttributeKey.valueOf[Request]("request")).getAndSet(null)
-        if (cmd == request.command) request.response.tryFailure(new GameException(exception))
-        else throw CommandNotMatchException(request.command, cmd)
-      // 事件
-      case Event(cmd, event) =>
-        // 并行处理不同类型的事件
-        listeners.get(cmd).foreach(listener => orderingExecute[Event](cmd, listener(event)))
-      // 请求
-      case request: Request => throw UnSupportedMessageException(request.`type`)
+    override def write(ctx: ChannelHandlerContext, msg: Object, promise: ChannelPromise) = {
+      msg match {
+        case req: Request => request = Some(req)
+        case event: Event =>
+        case msg: Message => throw UnSupportedMessageException(msg.`type`)
+      }
+      ctx.write(msg, promise)
     }
   }
+
+  class ConnectionInBoundHandler(val listeners: Map[Int, MapBean => Any] = Map.empty) extends SimpleChannelInboundHandler[Message] {
+
+    override def channelRead0(ctx: ChannelHandlerContext, msg: Message) = {
+      msg match {
+        // 正常响应
+        case Response(cmd, response) =>
+          val req = request.get
+          request = None
+          if (cmd == req.command) req.response.trySuccess(response)
+          else throw CommandNotMatchException(req.command, cmd)
+        // 异常响应
+        case Exception(cmd, exception) =>
+          val req = request.get
+          request = None
+          if (cmd == req.command) req.response.tryFailure(new GameException(exception))
+          else throw CommandNotMatchException(req.command, cmd)
+        // 事件
+        case Event(cmd, event) =>
+          // 并行处理不同类型的事件
+          listeners.get(cmd).foreach(listener => orderingExecute[Event](cmd, listener(event)))
+        // 请求
+        case request: Request => throw UnSupportedMessageException(request.`type`)
+      }
+    }
+
+    // 读异常
+    override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
+      cause.printStackTrace()
+      close()
+    }
+  }
+
 }
 
 class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
@@ -168,6 +181,10 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
         }
     }
   }, 5, 5, TimeUnit.SECONDS)
+
+  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int) = {
+    Future(callback(ask(cmd, request, timeout)))(Connection.ec)
+  }
 
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     if (isClosed) throw ConnectionClosedException()
