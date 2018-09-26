@@ -22,9 +22,18 @@ object Connection {
 
   implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-  def newCachedConnectionPool(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty) = new CachedConnectionPool(host, port, listeners)
+  def newCachedConnectionPool(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty, auth: (Int, MapBean) = null) = new CachedConnectionPool(host, port, listeners, auth)
 
-  def newSingleConnection(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty) = new Connection(host, port, listeners)
+  def newSingleConnection(host: String, port: Int, listeners: Map[Int, MapBean => Any] = Map.empty, auth: (Int, MapBean) = null) = {
+    val conn = new Connection(host, port, listeners)
+    if (auth != null)
+      try {
+        conn.ask(auth._1, auth._2)
+      } catch {
+        case cause: Throwable => conn.close(); throw cause
+      }
+    conn
+  }
 
 }
 
@@ -32,7 +41,7 @@ trait IConnection {
 
   def ask(cmd: Int, request: MapBean, timeout: Int = 3): MapBean
 
-  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int = 3): Future[Any]
+  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int = 3) = Future(callback(ask(cmd, request, timeout)))(Connection.ec)
 
   def notify(cmd: Int, event: MapBean): Unit
 
@@ -78,10 +87,6 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
       }
     })
     channel
-  }
-
-  override def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int) = {
-    Future(callback(ask(cmd, request, timeout)))(Connection.ec)
   }
 
   // 同时只能发送一个请求
@@ -161,12 +166,12 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
 
 }
 
-class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty) extends IConnection {
+class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty, auth: (Int, MapBean) = null) extends IConnection {
 
   // 同步请求使用连接池
   private val connections = collection.mutable.ListBuffer[(Connection, Deadline)]()
   // 事件使用的connection
-  private val eventConnection = Connection.newSingleConnection(host, port, listeners)
+  private val eventConnection = Connection.newSingleConnection(host, port, listeners, auth)
   // 定时关闭过期连接
   private val timer = Executors.newSingleThreadScheduledExecutor()
 
@@ -182,14 +187,10 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
     }
   }, 5, 5, TimeUnit.SECONDS)
 
-  def askAsync(cmd: Int, request: MapBean, callback: MapBean => Any, timeout: Int) = {
-    Future(callback(ask(cmd, request, timeout)))(Connection.ec)
-  }
-
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     if (isClosed) throw ConnectionClosedException()
     val opt = connections.synchronized(connections.headOption) // 从空闲连接池中拿一个连接
-    val connection = if (opt.nonEmpty) opt.get._1 else Connection.newSingleConnection(host, port, listeners)
+    val connection = if (opt.nonEmpty) opt.get._1 else Connection.newSingleConnection(host, port, listeners, auth)
     try {
       connection.ask(cmd, request, timeout) // 发送请求
     } finally {
