@@ -9,9 +9,7 @@ import scala.reflect._
  * Created by linyuhe on 2018/9/27.
  */
 
-abstract class IEvent(val eventId: Int) {
-
-}
+abstract class IEvent(val eventId: Int) {}
 
 object EventHub {
 
@@ -45,7 +43,8 @@ object EventHub {
 }
 
 object Test extends App {
-  case class LevelUpgrade(playerId: String, level: Int) extends IEvent(10) {}
+
+  case class LevelUpgrade(playerId: String, level: Int) extends IEvent(10)
 
   EventHub.subscribe((h: LevelUpgrade) => println(h.playerId))
   EventHub.publish(LevelUpgrade("10001", 10))
