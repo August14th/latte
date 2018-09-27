@@ -189,8 +189,8 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
 
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     if (isClosed) throw ConnectionClosedException()
-    val opt = connections.synchronized(connections.headOption) // 从空闲连接池中拿一个连接
-    val connection = if (opt.nonEmpty) opt.get._1 else Connection.newSingleConnection(host, port, listeners, auth)
+    val head = connections.synchronized(connections.headOption) // 从空闲连接池中拿一个连接
+    val connection = if (head.nonEmpty) head.get._1 else Connection.newSingleConnection(host, port, listeners, auth)
     try {
       connection.ask(cmd, request, timeout) // 发送请求
     } finally {

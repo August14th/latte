@@ -12,7 +12,7 @@ import scala.reflect._
  */
 object OrderingExecutor {
 
-  val executor = Executors.newCachedThreadPool()
+  private val executor = Executors.newCachedThreadPool()
 
   val tasks = mutable.Map.empty[Any, util.Queue[OrderingTask]]
 
