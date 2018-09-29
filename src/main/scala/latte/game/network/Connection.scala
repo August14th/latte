@@ -11,6 +11,7 @@ import io.netty.channel.socket.nio.NioSocketChannel
 import latte.game.network.OrderingExecutor._
 import latte.game.server.GameException
 
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.{Deadline, _}
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
@@ -169,7 +170,7 @@ class Connection(val host: String, val port: Int, val listeners: Map[Int, MapBea
 class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, MapBean => Any] = Map.empty, auth: (Int, MapBean) = null) extends IConnection {
 
   // 同步请求使用连接池
-  private val connections = collection.mutable.ListBuffer[(Connection, Deadline)]()
+  private val connections = ListBuffer[(Connection, Deadline)]()
   // 事件使用的connection
   private val eventConnection = Connection.newSingleConnection(host, port, listeners, auth)
   // 定时关闭过期连接
@@ -180,22 +181,21 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
   timer.scheduleAtFixedRate(new Runnable {
     // 每隔5秒检查一次
     override def run(): Unit = connections.synchronized {
-      if (connections.nonEmpty)
-        while (connections.last._2.isOverdue()) {
-          connections.remove(connections.size - 1)._1.close()
-        }
+      val timeout = connections.takeWhile{case (conn, deadline) => if (deadline.isOverdue()) {conn.close(); true} else false}
+      connections.remove(0, timeout.length)
     }
   }, 5, 5, TimeUnit.SECONDS)
 
   def ask(cmd: Int, request: MapBean, timeout: Int): MapBean = {
     if (isClosed) throw ConnectionClosedException()
-    val head = connections.synchronized(connections.headOption) // 从空闲连接池中拿一个连接
-    val connection = if (head.nonEmpty) head.get._1 else Connection.newSingleConnection(host, port, listeners, auth)
+    // 从空闲连接池中拿一个连接，先进后出，类似于栈
+    val (last, _) = connections.synchronized(if (connections.nonEmpty) connections.remove(connections.length - 1) else null)
+    val connection = if (last != null) last else Connection.newSingleConnection(host, port, listeners, auth)
     try {
       connection.ask(cmd, request, timeout) // 发送请求
     } finally {
       if (!connection.isClosed) connections.synchronized {
-        connections.insert(0, (connection, 1.minute.fromNow)) // 回收, 1分钟后销毁
+        connections.append((connection, 1.minute.fromNow)) // 回收, 1分钟后销毁
       }
     }
   }
