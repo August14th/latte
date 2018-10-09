@@ -181,8 +181,9 @@ class CachedConnectionPool(val host: String, port: Int, val listeners: Map[Int, 
   timer.scheduleAtFixedRate(new Runnable {
     // 每隔5秒检查一次
     override def run(): Unit = connections.synchronized {
-      val timeout = connections.takeWhile{case (conn, deadline) => if (deadline.isOverdue()) {conn.close(); true} else false}
+      val timeout = connections.takeWhile(_._2.isOverdue())
       connections.remove(0, timeout.length)
+      timeout.foreach(_._1.close())
     }
   }, 5, 5, TimeUnit.SECONDS)
 
