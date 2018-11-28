@@ -1,13 +1,17 @@
 package latte.game.config
 
-import latte.game.server.Config
-
 /**
  * Created by linyuhe on 2018/5/19.
  */
-class SceneConfig extends Config{
 
-  override def load = {
+object SceneConfig {
 
-  }
+  val configs = Map(10001 -> SceneConfig(10001, 1))
+
+  def apply(id: Int): SceneConfig = configs(id)
+
 }
+
+// type: 0主城,1野外地图,2单人副本3多人副本
+case class SceneConfig(id: Int, `type`: Int)
+

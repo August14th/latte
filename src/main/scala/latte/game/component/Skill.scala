@@ -18,5 +18,5 @@ class Skill private(player: Player) extends Component(player) {
 
   def toMapBean = MapBean.empty
 
-  override def loadFromDB() = {}
+  override def start() = {}
 }

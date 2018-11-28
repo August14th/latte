@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import io.netty.channel.Channel
 import latte.game.component.Skill
 import latte.game.network.{Event, MapBean}
+import latte.game.scene._
 
 import scala.collection.mutable
 
@@ -43,14 +44,28 @@ object Player {
 
 class Player(id: String) extends User(id) {
 
+  // 技能
   lazy val skill = Skill(this)
+  // 状态
+  lazy val state = Movement(this)
+  // 视野
+  lazy val view = View(this)
 
   override def toMapBean = super.toMapBean ++ MapBean("skill" -> skill.toMapBean)
+
+  // 跳转
+  def redirect(scene: Scene, pos: Vector2): Unit = {
+    scene.enter(this, pos, 0)
+  }
 
   var channel: Channel = _
 
   def tell(cmd: Int, event: MapBean): Unit = {
     if (channel != null) this.channel.writeAndFlush(Event(cmd, event))
+  }
+
+  def login(): MapBean = {
+    toMapBean ++ MapBean("lastPos" -> state.getLastPosition)
   }
 }
 
@@ -59,8 +74,7 @@ class User(val id: String) {
   loadFromDB()
 
   private def loadFromDB() = {
-    if(id == "10001") this.name = "latte"
-    else throw new PlayerNotFoundException(id)
+    name = "Player" + id
   }
 
   var name: String = _
@@ -69,6 +83,6 @@ class User(val id: String) {
 
   }
 
-  def toMapBean = MapBean("id" -> id, "name" -> name)
+  def toMapBean = MapBean("playerId" -> id, "playerName" -> name)
 
 }

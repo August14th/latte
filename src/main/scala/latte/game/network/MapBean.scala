@@ -58,7 +58,7 @@ class MapBean extends mutable.HashMap[String, Any] {
 
   def ++(that: MapBean) = MapBean(this.toSeq ++ that.toSeq: _*)
 
-  def getString(key: String): String = this.get(key, "")
+  def getString(key: String): String = this.get(key, null)
 
   def getInt(key: String): Int = this.get(key, 0)
 

@@ -11,7 +11,7 @@ import latte.game.scene.Scene
 
 object GameServer extends App {
   // 启动组件
-  Array(Scene).foreach(_.preStart())
+  Array(Scene).foreach(_.start())
   // 启动网络
   val server = new Server(Array(Command01, Command02).flatMap(_.toHandlers).toMap, Array(Event01).flatMap(_.toHandlers).toMap)
   server.listen(2018).sync

@@ -5,6 +5,6 @@ package latte.game.server
  */
 trait Manager {
 
-  def preStart() = {}
+  def start() = {}
 
 }

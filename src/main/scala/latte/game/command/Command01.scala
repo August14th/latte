@@ -17,7 +17,7 @@ object Command01 extends Command {
       case Some(player) =>
         channel.attr(AttributeKey.valueOf[String]("playerId")).set(player.id)
         player.channel = channel
-        player.toMapBean
+        player.login()
       case None => throw PlayerNotFoundException(playerId)
     }
   }
