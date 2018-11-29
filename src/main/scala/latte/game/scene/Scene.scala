@@ -1,10 +1,9 @@
 package latte.game.scene
 
-import java.util.concurrent.{TimeUnit, Executors}
+import java.util.concurrent.{Executors, TimeUnit}
 
 import latte.game.config.SceneConfig
-import latte.game.network.MapBean
-import latte.game.server.{GameException, Component, Manager, Player}
+import latte.game.server.{GameException, Manager, Player}
 
 /**
  * Created by linyuhe on 2018/5/19.
@@ -22,16 +21,13 @@ object Scene extends Manager {
     scenes = SceneConfig.configs.values.filter(conf => conf.`type` == 0 || conf.`type` == 1)
       .map(conf => conf.id -> new Scene(conf.id, conf)).toMap
   }
-
 }
 
-class Scene(val sceneId: Int, val sceneConfig: SceneConfig) {
+class Scene(val sceneId: Int, val sceneConfig: SceneConfig) extends Grids(sceneConfig.id + ".bytes") {
 
   private val frame = 10
-  // 网格
-  val grids = MapGrids(sceneId + ".bytes")
   // 玩家的视野
-  private var players = Set.empty[Player]
+  var movements = new Movement(this)
   // 线程
   val timer = Scene.scheduler.scheduleAtFixedRate(new Runnable {
     override def run(): Unit = {
@@ -46,58 +42,28 @@ class Scene(val sceneId: Int, val sceneConfig: SceneConfig) {
   // 主循环
   def tick(deltaTime: Double) {
     // movement
-    players.foreach(player => {
-      player.state.tick(deltaTime)
-    })
+    movements.tick(deltaTime)
   }
 
   protected def tryEnter(player: Player) = {
-    true
+
   }
 
   // 进入场景
-  def enter(player: Player, coord: Vector2, angle: Int) = {
-    // 退出上一个场景
-    val pos = player.state.pos
-    if (pos != null) pos.scene.tryLeave(player)
+  def enter(player: Player, pos: Vector2, angle: Int) = {
+    player.scene.foreach(_.tryLeave(player))
     tryEnter(player)
-    if (!grids.isWalkable(coord)) throw new GameException("Not reachable.")
-    if (pos != null) pos.scene.leave(player)
+    if (!isWalkable(pos)) throw new GameException("Not reachable.")
+    player.scene.foreach(_.leave(player))
     // 设置新的坐标位置
-    player.state.setPosition(this, coord, angle, Move(0))
-    players += player
+    movements.addPlayer(player, pos, angle)
+    player.scene = Some(this)
     onPlayerEnter(player)
   }
 
   protected def onPlayerEnter(player: Player): Unit = {
 
   }
-
-  def isWalkable(pos: Vector2) = {
-    val grid = grids.getGrid(pos)
-    grid != null && grid.isWalkable
-  }
-
-  def findPath(start: Vector2, end: Vector2) = {
-    val startGrid = grids.getGrid(start)
-    val endGrid = grids.getGrid(end)
-
-    if (startGrid != null && startGrid.isWalkable && endGrid != null && endGrid.isWalkable) {
-      grids.findPath(startGrid, endGrid)
-    } else {
-      throw new GameException("target is not reachable.")
-    }
-  }
-
-  def surroundingPlayers(player: Player, radius: Float) = {
-    val pos = player.state.pos.grid
-    players.filter(other => {
-      val otherPos = other.state.pos.grid
-      Math.abs(otherPos.row - pos.row) <= radius / grids.size || Math.abs(otherPos.column - pos.column) <= radius / grids.size
-    })
-  }
-
-  def tellAllPlayers(cmd: Int, event: MapBean) = players.foreach(_.tell(cmd, event))
 
   // 释放技能
   def skill(player: Player) = {
@@ -115,7 +81,8 @@ class Scene(val sceneId: Int, val sceneConfig: SceneConfig) {
   }
 
   private def leave(player: Player): Unit = {
-    players -= player
+    player.scene = None
+    movements.removePlayer(player)
     onPlayerLeave(player)
   }
 

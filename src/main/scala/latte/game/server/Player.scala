@@ -46,10 +46,10 @@ class Player(id: String) extends User(id) {
 
   // 技能
   lazy val skill = Skill(this)
-  // 状态
-  lazy val state = Movement(this)
-  // 视野
-  lazy val view = View(this)
+
+  var scene: Option[Scene] = None
+
+  var speed: Double = 7d
 
   override def toMapBean = super.toMapBean ++ MapBean("skill" -> skill.toMapBean)
 
@@ -65,7 +65,28 @@ class Player(id: String) extends User(id) {
   }
 
   def login(): MapBean = {
-    toMapBean ++ MapBean("lastPos" -> state.getLastPosition)
+    toMapBean ++ MapBean("lastPos" -> MapBean("sceneId" -> 10001, "x" -> 1730, "z" -> -3800, "angle" -> 0))
+  }
+
+  def movement = {
+    if (scene.isDefined)
+      scene.get.movements.movement(this)
+    else None
+  }
+
+  def moveTowards(angle: Int): Unit = {
+    val move = movement
+    if (move.isDefined) move.get.moveTowards(angle)
+  }
+
+  def stopMoving(): Unit = {
+    val move = movement
+    if (move.isDefined) move.get.stopMoving()
+  }
+
+  def moveToTarget(x: Double, z: Double): Unit = {
+    val move = movement
+    if (move.isDefined) move.get.moveToTarget(x, z)
   }
 }
 

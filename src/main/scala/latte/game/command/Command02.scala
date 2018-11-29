@@ -27,7 +27,7 @@ object Command02 extends Command {
    */
   def handler02(player: Player, request: MapBean): MapBean = {
     val angle = request.getInt("angle")
-    player.state.moveTowards(angle)
+    player.moveTowards(angle)
     MapBean.empty
   }
 
@@ -35,7 +35,7 @@ object Command02 extends Command {
    * 停止移动
    */
   def handler03(player: Player, request: MapBean): MapBean = {
-    player.state.stopMoving()
+    player.stopMoving()
     MapBean.empty
   }
 
@@ -46,7 +46,7 @@ object Command02 extends Command {
     val x = request.getInt("x") / 100d
     val z = request.getInt("z") / 100d
 
-    player.state.moveToTarget(x, z)
+    player.moveToTarget(x, z)
     MapBean.empty
   }
 }

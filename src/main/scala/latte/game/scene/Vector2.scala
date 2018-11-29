@@ -3,6 +3,9 @@ package latte.game.scene
 /**
  * Created by linyuhe on 2018/11/26.
  */
+object Vector2{
+  val zero = Vector2(0, 0)
+}
 
 case class Vector2(x: Double, z: Double) {
 
