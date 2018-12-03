@@ -119,7 +119,7 @@ class Grids(file: String) {
       val to = g2.center
       val direction = (to - from).normalized
       var position = from // 从start到end途中经过的grid
-      var grid = getGrid(position).get
+      var grid = g1
       var prev: Grid = null
       while (grid != g2) {
         if (!grid.isWalkable) return false

@@ -3,8 +3,10 @@ package latte.game.scene
 /**
  * Created by linyuhe on 2018/11/26.
  */
-object Vector2{
+object Vector2 {
   val zero = Vector2(0, 0)
+
+  def fromAngle(angle: Double) = Vector2(math.sin(math.toRadians(angle)), math.cos(math.toRadians(angle)))
 }
 
 case class Vector2(x: Double, z: Double) {
@@ -29,6 +31,8 @@ case class Vector2(x: Double, z: Double) {
     else if(x >= 0 && z < 0) degree = 180 + degree
     degree
   }
+
+  override def toString = s"($x, $z)"
 
 }
 

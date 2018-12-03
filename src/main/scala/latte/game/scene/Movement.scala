@@ -9,11 +9,9 @@ class Movement(val scene: Scene) {
 
   private var movements = Map.empty[Player, PlayerMovement]
 
-  def addPlayer(player: Player, pos: Vector2, angle: Int): Unit = {
-    val movement = new PlayerMovement(player)
+  def addPlayer(player: Player, pos: Vector2, forward: Vector2): Unit = {
+    val movement = new PlayerMovement(player, pos, forward)
     movements += player -> movement
-    // 新的位置
-    movement.setPosition(pos, angle, MoveState(0))
   }
 
   def removePlayer(player: Player) = movements -= player
@@ -37,38 +35,30 @@ class Movement(val scene: Scene) {
   }
 
   // 场景负责玩家的位置更新
-  class PlayerMovement(val player: Player) {
-    // 场景内的位置
-    private var pos: Vector2 = Vector2.zero
-    // 朝向
-    private var angle: Int = 0
-    // 状态
-    private var state: MoveState = MoveState(0)
+  class PlayerMovement(val player: Player, private var pos: Vector2, private var forward: Vector2, var state: MoveState = MoveState(0)) {
 
     def tick(deltaTime: Double): Unit = {
       state.`type` match {
         case 0 =>
         case 1 =>
           //  朝着指定方向移动
-          val forward = Vector2(math.sin(math.toRadians(angle)), math.cos(math.toRadians(angle)))
           val newPos = pos + forward * player.speed * deltaTime
           // 客户端和服务器分别计算
           if (scene.isWalkable(newPos)) setPos(newPos)
         case 2 =>
           // 自动寻路
-          val forward = Vector2(math.sin(math.toRadians(angle)), math.cos(math.toRadians(angle)))
           val newPos = pos + forward * player.speed * deltaTime
           val path = state.params.asInstanceOf[List[Vector2]] // 路径点
         val target = scene.getGrid(path.head)
           if (scene.getGrid(newPos) == target) {
-            // 到达结点
+            // 到达节点
             if (path.tail.nonEmpty) {
-              // 新的结点
-              val angle = (path(1) - newPos).angle().toInt
-              setPosition(newPos, angle, MoveState(2, path.tail))
+              // 新的节点
+              val newForward = (path(1) - newPos).normalized
+              setPosition(newPos, newForward, MoveState(2, path.tail))
             } else {
               // 到达目标点
-              setPosition(newPos, angle, MoveState(0))
+              setPosition(newPos, forward, MoveState(0))
             }
           } else setPos(newPos)
       }
@@ -76,42 +66,19 @@ class Movement(val scene: Scene) {
 
     def position = pos
 
-    def setPosition(newPos: Vector2, newAngle: Int, newState: MoveState): Unit = {
+    def setPosition(newPos: Vector2, newForward: Vector2, newState: MoveState): Unit = {
       // 设置新的坐标
       if (scene.isWalkable(newPos)) {
         pos = newPos
-        angle = newAngle
+        forward = newForward
         state = newState
-        player.tell(0x0202, MapBean("sceneId" -> scene.sceneId, "x" -> (pos.x * 100).toInt, "z" -> (pos.z * 100).toInt,
-          "angle" -> angle, "state" -> state.`type`, "speed" -> player.speed))
         // 更新视野
         updateView()
       }
     }
 
-    def moveTowards(angle: Int): Unit = {
-      setPosition(pos, angle, MoveState(1))
-    }
-
-    def stopMoving(): Unit = {
-      this.setPosition(pos, angle, MoveState(0))
-    }
-
-    def moveToTarget(x: Double, z: Double): Unit = {
-      val target = Vector2(x, z)
-      val inSameGrid = scene.getGrid(pos) == scene.getGrid(target)
-      if (!inSameGrid) {
-        val path = scene.findPath(pos, target)
-        val angle = (path(1) - pos).angle().toInt
-        this.setPosition(pos, angle, MoveState(2, path.tail))
-      } else {
-        val angle = (target - pos).angle().toInt
-        this.setPosition(pos, angle, MoveState(0))
-      }
-    }
-
     private def setPos(newPos: Vector2) = {
-      if (scene.isWalkable(pos)) {
+      if (scene.isWalkable(newPos)) {
         pos = newPos
         // 更新视野
         updateView()

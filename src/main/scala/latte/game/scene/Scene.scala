@@ -15,7 +15,7 @@ object Scene extends Manager {
   // 所有场景
   var scenes = Map.empty[Int, Scene]
 
-  def apply(sceneId: Int) = scenes(sceneId)
+  def apply(sceneId: Int) = scenes.get(sceneId)
 
   override def start(): Unit = {
     scenes = SceneConfig.configs.values.filter(conf => conf.`type` == 0 || conf.`type` == 1)
@@ -25,7 +25,7 @@ object Scene extends Manager {
 
 class Scene(val sceneId: Int, val sceneConfig: SceneConfig) extends Grids(sceneConfig.id + ".bytes") {
 
-  private val frame = 10
+  private val frame = 30
   // 玩家的视野
   var movements = new Movement(this)
   // 线程
@@ -50,14 +50,14 @@ class Scene(val sceneId: Int, val sceneConfig: SceneConfig) extends Grids(sceneC
   }
 
   // 进入场景
-  def enter(player: Player, pos: Vector2, angle: Int) = {
+  def enter(player: Player, pos: Vector2, angle: Double) = {
     player.scene.foreach(_.tryLeave(player))
     tryEnter(player)
     if (!isWalkable(pos)) throw new GameException("Not reachable.")
     player.scene.foreach(_.leave(player))
     // 设置新的坐标位置
-    movements.addPlayer(player, pos, angle)
-    player.scene = Some(this)
+    movements.addPlayer(player, pos, Vector2.fromAngle(angle))
+    player.sceneId = sceneId
     onPlayerEnter(player)
   }
 
@@ -81,7 +81,7 @@ class Scene(val sceneId: Int, val sceneConfig: SceneConfig) extends Grids(sceneC
   }
 
   private def leave(player: Player): Unit = {
-    player.scene = None
+    player.sceneId = 0
     movements.removePlayer(player)
     onPlayerLeave(player)
   }

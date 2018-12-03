@@ -47,7 +47,7 @@ class Player(id: String) extends User(id) {
   // 技能
   lazy val skill = Skill(this)
 
-  var scene: Option[Scene] = None
+  var sceneId: Int = 0
 
   var speed: Double = 7d
 
@@ -68,25 +68,12 @@ class Player(id: String) extends User(id) {
     toMapBean ++ MapBean("lastPos" -> MapBean("sceneId" -> 10001, "x" -> 1730, "z" -> -3800, "angle" -> 0))
   }
 
+  def scene = if (sceneId != 0) Scene(sceneId) else None
+
   def movement = {
     if (scene.isDefined)
       scene.get.movements.movement(this)
     else None
-  }
-
-  def moveTowards(angle: Int): Unit = {
-    val move = movement
-    if (move.isDefined) move.get.moveTowards(angle)
-  }
-
-  def stopMoving(): Unit = {
-    val move = movement
-    if (move.isDefined) move.get.stopMoving()
-  }
-
-  def moveToTarget(x: Double, z: Double): Unit = {
-    val move = movement
-    if (move.isDefined) move.get.moveToTarget(x, z)
   }
 }
 
