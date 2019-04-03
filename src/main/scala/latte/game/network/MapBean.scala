@@ -3,6 +3,8 @@ package latte.game.network
 import java.util
 import java.util.Date
 
+import com.fasterxml.jackson.databind.ObjectMapper
+
 import scala.collection.JavaConversions.mapAsScalaMap
 import scala.collection.mutable
 
@@ -65,5 +67,7 @@ class MapBean extends mutable.HashMap[String, Any] {
   def getDate(key: String): Date = this.get(key, null)
 
   def toJavaMap = MapBean.toJava(this)
+
+  override def toString = new ObjectMapper().writeValueAsString(toJavaMap)
 
 }

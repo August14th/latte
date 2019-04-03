@@ -5,8 +5,5 @@ package latte.game.server
  */
 class Component(val player: Player) {
 
-  def start(){}
-
-  def tick(deltaTime: Double){}
 
 }

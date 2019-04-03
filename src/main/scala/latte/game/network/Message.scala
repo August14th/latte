@@ -15,16 +15,16 @@ object Message extends Enumeration {
   val Event = Value(3)
 }
 
-class Message(val command: Int, val body: MapBean, val `type`: Message.Type) {
+class Message(val id: Int, val command: Int, val body: MapBean, val `type`: Message.Type) {
 
 }
 
-case class Request(cmd: Int, request: MapBean) extends Message(cmd, request, Message.Request){
+case class Request(override val id: Int, cmd: Int, request: MapBean) extends Message(id, cmd, request, Message.Request) {
   val response = Promise[MapBean]()
 }
 
-case class Response(cmd: Int, response: MapBean) extends Message(cmd, response, Message.Response)
+case class Response(override val id: Int, cmd: Int, response: MapBean) extends Message(id, cmd, response, Message.Response)
 
-case class Exception(cmd: Int, error: String) extends Message(cmd, MapBean("err" -> error), Message.Exception)
+case class Exception(override val id: Int, cmd: Int, error: String) extends Message(id, cmd, MapBean("err" -> error), Message.Exception)
 
-case class Event(cmd: Int, event: MapBean) extends Message(cmd, event, Message.Event)
+case class Event(cmd: Int, event: MapBean) extends Message(0, cmd, event, Message.Event)

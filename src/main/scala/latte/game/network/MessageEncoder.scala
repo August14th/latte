@@ -14,6 +14,8 @@ class MessageEncoder extends MessageToByteEncoder[Message] {
 
   override protected def encode(ctx: ChannelHandlerContext, msg: Message, out: ByteBuf) {
     val body = mapper.writeValueAsBytes(msg.body.toJavaMap)
+    // 消息序号
+    out.writeInt(msg.id)
     // 协议号
     out.writeInt(msg.command)
     // 消息类型

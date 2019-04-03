@@ -1,12 +1,12 @@
 package latte.game.server
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentHashMap
 
-import io.netty.channel.Channel
 import latte.game.component.Skill
-import latte.game.network.{Event, MapBean}
+import latte.game.network.{Connection, MapBean}
 import latte.game.scene._
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /**
@@ -15,38 +15,44 @@ import scala.collection.mutable
 
 object Player {
 
-  private val counts = mutable.Map.empty[String, AtomicInteger]
+  private val locks = mutable.Map.empty[String, Object]
 
-  private val players = mutable.Map.empty[String, Player]
+  private val players = new ConcurrentHashMap[String, Player].asScala
 
   def apply[T](playerId: String)(op: Option[Player] => T): T = {
     if (playerId != null && playerId.nonEmpty) {
-      // 锁
-      val count = counts.synchronized {
-        counts.getOrElseUpdate(playerId, new AtomicInteger(0))
+      // 顺序处理
+      val lock = locks.synchronized {
+        locks.getOrElseUpdate(playerId, new Object)
       }
-      val player = try count.synchronized {
-        // 如果内存中没有重新从数据库中加载一次
-        players.getOrElseUpdate(playerId, new Player(playerId))
-      } catch {
-        case _: PlayerNotFoundException => return op(None)
-      }
-      try {
-        // 基于计数的内存管理
-        count.incrementAndGet()
-        op(Some(player))
-      } finally {
-        count.decrementAndGet()
+      lock.synchronized {
+        val player = players.get(playerId) match {
+          case p: Some[Player] => p
+          case None => loadPlayer(playerId)
+        }
+        op(player)
       }
     } else op(None)
+  }
+
+  private def loadPlayer(playerId: String): Option[Player] = {
+    if(playerId == "10000") Some(new Player(playerId))
+    else None
+  }
+
+  def newPlayer(playerId: String, name: String): Unit = {
+
   }
 }
 
 class Player(id: String) extends User(id) {
-
   // 技能
   lazy val skill = Skill(this)
-
+  // 事件
+  lazy val eventHub = EventHub(this)
+  // 客户端连接
+  private var connection: Option[Connection] = None
+  // 场景id
   var sceneId: Int = 0
 
   var speed: Double = 7d
@@ -58,13 +64,12 @@ class Player(id: String) extends User(id) {
     scene.enter(this, pos, 0)
   }
 
-  var channel: Channel = _
+  def tell(cmd: Int, event: MapBean): Unit = if (connection.isDefined) connection.get.tell(cmd, event)
 
-  def tell(cmd: Int, event: MapBean): Unit = {
-    if (channel != null) this.channel.writeAndFlush(Event(cmd, event))
-  }
 
-  def login(): MapBean = {
+
+  def login(connection: Connection): MapBean = {
+    this.connection = Some(connection)
     toMapBean ++ MapBean("lastPos" -> MapBean("sceneId" -> 10001, "x" -> 1730, "z" -> -3800, "angle" -> 0))
   }
 

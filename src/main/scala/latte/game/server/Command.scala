@@ -1,8 +1,6 @@
 package latte.game.server
 
-import io.netty.channel.Channel
-import io.netty.util.AttributeKey
-import latte.game.network.MapBean
+import latte.game.network.{Connection, MapBean}
 
 /**
  * Created by linyuhe on 2018/5/19.
@@ -19,8 +17,8 @@ trait Command {
       // 生成响应函数
       cmd -> (if (method.getParameterTypes.toList.head == classOf[Player]) {
         // 登录后
-        (channel: Channel, request: MapBean) =>
-          val playerId = channel.attr(AttributeKey.valueOf[String]("playerId")).get()
+        (connection: Connection, request: MapBean) =>
+          val playerId = connection.attachment.asInstanceOf[String]
           Player(playerId) {
             case Some(player) => method.invoke(this, player, request).asInstanceOf[MapBean]
             case None => throw PlayerNotFoundException(playerId)
@@ -28,8 +26,8 @@ trait Command {
 
       } else {
         // 登录前
-        (channel: Channel, request: MapBean) =>
-          method.invoke(this, channel, request).asInstanceOf[MapBean]
+        (connection: Connection, request: MapBean) =>
+          method.invoke(this, connection, request).asInstanceOf[MapBean]
       })
     }
   }
