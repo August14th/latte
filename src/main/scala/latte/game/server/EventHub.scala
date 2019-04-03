@@ -21,11 +21,11 @@ object EventHub {
 
   val executors = new OrderingExecutor(8)
 
-  def apply(owner: Any) = new EventHub(owner)
+  def apply() = new EventHub
 
 }
 
-class EventHub(val owner: Any) {
+class EventHub {
 
   private val listeners = collection.mutable.Map.empty[(ClassTag[_], Int), ListBuffer[EventHub.Listener]]
 
@@ -33,7 +33,7 @@ class EventHub(val owner: Any) {
     val list = listeners.synchronized(listeners.get(classTag[T], eventId).map(_.toList))
     if (list.nonEmpty) {
       // 每个监听器都串行处理事件，不同监听器是并发的
-      list.get.foreach { case h => EventHub.executors.orderingExecute((owner, h), h(params)) }
+      list.get.foreach { case h => EventHub.executors.orderingExecute((this, h), h(params)) }
     }
   }
 

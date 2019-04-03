@@ -49,7 +49,7 @@ class Player(id: String) extends User(id) {
   // 技能
   lazy val skill = Skill(this)
   // 事件
-  lazy val eventHub = EventHub(this)
+  lazy val eventHub = EventHub()
   // 客户端连接
   private var connection: Option[Connection] = None
   // 场景id
