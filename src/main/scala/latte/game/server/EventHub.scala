@@ -21,19 +21,13 @@ object EventHub {
 
   val executors = new OrderingExecutor(8)
 
-  def apply() = new EventHub
-
-}
-
-class EventHub {
-
   private val listeners = collection.mutable.Map.empty[(ClassTag[_], Int), ListBuffer[EventHub.Listener]]
 
   def publish[T: ClassTag](eventId: Int, params: MapBean): Unit = {
     val list = listeners.synchronized(listeners.get(classTag[T], eventId).map(_.toList))
     if (list.nonEmpty) {
       // 每个监听器都串行处理事件，不同监听器是并发的
-      list.get.foreach { case h => EventHub.executors.orderingExecute((this, h), h(params)) }
+      list.get.foreach { case h => EventHub.executors.orderingExecute(h, h(params)) }
     }
   }
 
