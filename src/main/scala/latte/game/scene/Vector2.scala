@@ -6,6 +6,8 @@ package latte.game.scene
 object Vector2 {
   val zero = Vector2(0, 0)
 
+  val forward = Vector2(0, 1)
+
   def fromAngle(angle: Double) = Vector2(math.sin(math.toRadians(angle)), math.cos(math.toRadians(angle)))
 }
 
@@ -26,9 +28,9 @@ case class Vector2(x: Double, z: Double) {
   def normalized = this / len()
 
   def angle() = {
-    var  degree = math.toDegrees(math.atan(x / z))
-    if(x < 0 && z < 0) degree = degree - 180
-    else if(x >= 0 && z < 0) degree = 180 + degree
+    var degree = math.toDegrees(math.atan(x / z))
+    if (x < 0 && z < 0) degree = degree - 180
+    else if (x >= 0 && z < 0) degree = 180 + degree
     degree
   }
 

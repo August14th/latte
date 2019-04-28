@@ -12,7 +12,6 @@ import latte.game.scene.Scene
 object GameServer extends App {
   // 启动组件
   val managers = Array(Scene)
-  managers.foreach(_.start())
   // 命令
   val commands = Array(Command01, Command02)
   // 事件

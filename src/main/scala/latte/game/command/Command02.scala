@@ -1,7 +1,7 @@
 package latte.game.command
 
 import latte.game.network.MapBean
-import latte.game.scene.{MoveState, Scene, Vector2}
+import latte.game.scene.{MoveEvent, MoveState, Scene, Vector2}
 import latte.game.server.{Command, Player}
 
 /**
@@ -17,8 +17,7 @@ object Command02 extends Command {
     val x = request.getInt("x") / 100f
     val z = request.getInt("z") / 100f
     val angle = request.getInt("angle") / 100f
-    val scene = Scene(sceneId)
-    scene.get.enter(player, Vector2(x, z), angle)
+    Scene.enterScene(player, sceneId, Vector2(x, z), Vector2.fromAngle(angle))
     MapBean("sceneId" -> sceneId, "x" -> (x * 100).toInt, "z" -> (z * 100).toInt, "angle" -> angle)
   }
 
@@ -28,15 +27,13 @@ object Command02 extends Command {
   def handler02(player: Player, request: MapBean): MapBean = {
     val x = request.getInt("x") / 100f
     val z = request.getInt("z") / 100f
-    val angle = request.getInt("angle") / 100f
-    val state = request.getInt("state")
-    player.movement match {
-      case Some(movement) =>
-        val newPos = Vector2(x, z)
-        val newForward = Vector2.fromAngle(angle)
-        println(s"pos:${movement.position}, newPos:$newPos, forward:$newForward")
-        movement.setPosition(newPos, newForward, MoveState(state))
-      case None =>
+    val angle = request.getInt("angle") / 100f // 朝向
+    val state = request.getInt("state") // 状态，0 停止，1 向前移动
+
+    val sceneOpt = Scene.getSceneOf(player.id)
+    if (sceneOpt.isDefined) {
+      sceneOpt.get.addEvent(player.id, MoveEvent(Vector2(x, z),
+        Vector2.fromAngle(angle), MoveState(state)))
     }
     MapBean.empty
   }

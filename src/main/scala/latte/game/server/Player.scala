@@ -35,8 +35,23 @@ object Player {
     } else op(None)
   }
 
+  def applyIfOnline(playerId: String)(op: Player => Any) = {
+    if (playerId != null && playerId.nonEmpty) {
+      // 顺序处理
+      val lock = locks.synchronized {
+        locks.getOrElseUpdate(playerId, new Object)
+      }
+      lock.synchronized {
+        players.get(playerId) match {
+          case Some(player) => op(player)
+          case None =>
+        }
+      }
+    }
+  }
+
   private def loadPlayer(playerId: String): Option[Player] = {
-    if(playerId == "10000") Some(new Player(playerId))
+    if (playerId == "1000") Some(new Player(playerId))
     else None
   }
 
@@ -50,33 +65,24 @@ class Player(id: String) extends User(id) {
   lazy val skill = Skill(this)
   // 客户端连接
   private var connection: Option[Connection] = None
-  // 场景id
-  var sceneId: Int = 0
 
   var speed: Double = 7d
+
+  def isOnline = connection.isDefined
 
   override def toMapBean = super.toMapBean ++ MapBean("skill" -> skill.toMapBean)
 
   // 跳转
   def redirect(scene: Scene, pos: Vector2): Unit = {
-    scene.enter(this, pos, 0)
+    scene.enter(this, pos, Vector2.forward)
   }
 
   def tell(cmd: Int, event: MapBean): Unit = if (connection.isDefined) connection.get.tell(cmd, event)
 
 
-
   def login(connection: Connection): MapBean = {
     this.connection = Some(connection)
-    toMapBean ++ MapBean("lastPos" -> MapBean("sceneId" -> 10001, "x" -> 1730, "z" -> -3800, "angle" -> 0))
-  }
-
-  def scene = if (sceneId != 0) Scene(sceneId) else None
-
-  def movement = {
-    if (scene.isDefined)
-      scene.get.movements.movement(this)
-    else None
+    toMapBean ++ MapBean("lastPos" -> MapBean("sceneId" -> 1001, "x" -> 1730, "z" -> -3800, "angle" -> 0))
   }
 }
 
